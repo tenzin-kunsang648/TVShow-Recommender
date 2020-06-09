@@ -1,6 +1,3 @@
-Math 285, Final Project
-================
-
 ## URL for webpage
 https://tenzin-kunsang.shinyapps.io/project-kunsang-gormally-mohamed/
 
