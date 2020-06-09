@@ -1,0 +1,196 @@
+---
+title: "Math 285, Final Project"
+author: "Tenzin Kunsang, Conor Gormally, Nasra Mohamed"
+date: "6/4/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(tidyverse)
+library(rebus)
+library(rvest)
+library(tidyr)
+```
+
+```{r pull urls iteratively, cache=TRUE}
+tv_urls <- vector()
+
+#grabbing urls of shows listed on netflix
+for(i in seq(0,1900,50)){
+  tv_urls <- c(tv_urls, read_html(paste0("https://reelgood.com/tv/source/netflix?offset=", i)) %>%
+                 html_nodes(".css-1u7zfla a") %>%
+                 html_attr("href"))
+}
+
+#grabbing urls of shows listed on hulu
+for(i in seq(0,1700,50)){
+  tv_urls <- c(tv_urls, read_html(paste0("https://reelgood.com/tv/source/hulu?offset=", i)) %>%
+                 html_nodes(".css-1u7zfla a") %>%
+                 html_attr("href"))
+}
+
+#grabbing urls of shows listed on prime
+for(i in seq(0,2100,50)){
+  tv_urls <- c(tv_urls, read_html(paste0("https://reelgood.com/tv/source/amazon?offset=", i)) %>%
+                 html_nodes(".css-1u7zfla a") %>%
+                 html_attr("href"))
+}
+
+#grabbing urls of shows listed on disney
+for(i in seq(0,150,50)){
+  tv_urls <- c(tv_urls, read_html(paste0("https://reelgood.com/tv/source/disney_plus?offset=", i)) %>%
+                 html_nodes(".css-1u7zfla a") %>%
+                 html_attr("href"))
+}
+
+#need to add our prefix to make these scrapable urls
+tv_urls <- str_c("https://reelgood.com", tv_urls)
+```
+
+```{r genres list}
+#create a list of genres to check against (necessary due to css selector issues with the website)
+genres_list <- c("Action & Adventure", "Animation" , "Anime", "Biography", "Children", "Comedy",
+                   "Crime", "Cult", "Documentary", "Drama", "Family", "Fantasy", "Food", "Game Show",
+                   "History", "Home & Garden", "Horror", "LGBTQ", "Musical", "Mystery", "Reality",
+                   "Romance", "Science-Fiction", "Sport", "Stand-up & Talk", "Thriller", "Travel")
+```
+
+```{r scraping function, cache=TRUE}
+
+scrape_show_info <- function(url) {
+  
+  # Scrape HTML for page
+  page <- read_html(url)
+  
+  # Scrape the title
+  title <- page %>%
+    html_nodes(".e14injhv7") %>%
+    html_text() %>%
+    str_trim()
+  
+  # Scrape the genre
+  #This required conditional execution after the update to IMDB
+  genres <- page %>% 
+    html_nodes(".css-19fr2c5 a")
+
+
+  #We get genres and tags here, so we need to remove all the tags
+  genres <- genres %>%
+    html_text() %>%
+    str_trim() %>%
+    str_c(collapse = ", ") %>% 
+    str_split(", ")
+  
+  #create a keywords variable so that keywords can be extracted as well
+  keywords <- genres
+  
+  #grab the genres
+  genres <- genres[[1]][which(genres[[1]] %in% genres_list)] %>% 
+    str_c(collapse = ", ")
+  
+  #grab the keywords before we get rid of them
+  keywords <- keywords[[1]][which(!keywords[[1]] %in% genres_list)] %>%
+    str_c(collapse = ", ")
+ 
+  
+  # Scrape the Age rating
+   age <- page %>%
+     html_node(".ey4ir3j1~ .ey4ir3j1+ .ey4ir3j1 span") %>%
+     html_text() %>% 
+     str_remove("Rated:") %>% 
+     str_remove("[+]")
+
+  # Scrape the imdb rating
+   imdb <- page %>%
+     html_node(".ey4ir3j3") %>%
+     html_text()
+  
+  # Scrape the rotten tomatoes score
+  rotten_tomatoes <- page %>%
+    html_node(".ey4ir3j6") %>%
+    html_text() %>%
+    parse_number()
+  
+  # Extract the year from url
+  year <- url %>% 
+    str_extract("[:digit:]{4}$") #we didn't end up using this as we're using 
+                                 #kaggle as a base data set using their years
+  
+  # Create a tibble that we can add to tvshows
+   tibble(
+     title = title,
+     age = age,  
+     genres = genres,
+     imdb = imdb,
+     rotten_tomatoes = rotten_tomatoes,
+     year = year,
+     keywords = keywords
+   ) 
+}
+
+#test case as we wrote the function
+#scrape_show_info(tv_urls[1])
+```
+
+```{r scraping process, cache = TRUE}
+#create dataframe with the first 200 tv shows
+tv_shows <- tv_urls[1:100] %>% map_df(scrape_show_info)
+
+#add the rest of the shows. total of 6004 - done 200 at a time
+#tv_shows <- add_row(tv_shows, tv_urls[5801:6004] %>% map_df(scrape_show_info))
+```
+
+
+```{r writing scraped data to csv}
+#create a dataset in the same directory
+# write.csv(tv_shows,"/project-kunsang-gormally-mohamed/tv_data.csv", row.names = FALSE)
+```
+
+```{r read in kaggle}
+tv <- read.csv("tv_shows_kaggle.csv") %>% 
+  select(-X)
+```
+
+```{r manipulating our dataframe}
+#creating a dataframe from our scraped data
+tv_shows <- read.csv("tv_data.csv")
+
+#refactoring the age rating 
+tv_shows$age <- tv_shows$age %>% fct_collapse(
+  "TV-G" = c(" All (TV-G)", "All (TV-G)"),
+  "TV-PG" = c(" 7 (TV-PG)", "7 (TV-PG)"),
+  #lumping in 13 with TV-14 because it isn't a real tv rating and there are only 4 values
+  "TV-14" = c(" 14 (TV-14)", "14 (TV-14)", "13"),
+  "TV-MA" = c(" 18 (TV-MA)", "18 (TV-MA)")
+) 
+
+#joining the kaggle dataframe to our scraped data 
+
+#We experimented with using only our data, but decided to focus on the app instead of 
+# focusig on recategorizing the shows. We also decided to use the Kaggle dataset's
+# `year` data because there were some inconsistencies in the data we scraped 
+tv_shows <- tv_shows %>% 
+  inner_join(tv, by = c("title" = "Title")) %>% 
+  select(-Age, -year, -IMDb, -Rotten.Tomatoes, -type)
+
+#renaming the relevant remaining columns
+tv_shows <- tv_shows %>% 
+  rename(year = Year, netflix = Netflix, hulu = Hulu, prime = Prime.Video, disney = Disney.)
+
+#the genres column was categorized as a factor vector so we recode it to character
+tv_shows$genres <- as.character(tv_shows$genres)
+
+#There were multiple identical and near-identical observations in our data set
+# so we decided to keep only distinct titles
+tv_shows <- distinct(tv_shows, title, .keep_all = TRUE)
+```
+
+```{r create the csv for our app}
+#we need different versions for different people to alter data.csv
+#write.csv(tv_shows, "/Users/ConorGormally/Documents/Spring2020/Math285/assignments/project-kunsang-gormally-mohamed/data.csv", row.names = FALSE)
+#write.csv(tv_shows,"/Users/kunsang/Desktop/math285/Group Work/project-kunsang-gormally-mohamed/data.csv", row.names = FALSE)
+```
+

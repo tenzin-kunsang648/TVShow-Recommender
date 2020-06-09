@@ -1,5 +1,7 @@
-Math 285, Final Project
-================
+---
+title: "Math 285, Final Project"
+output: github_document
+---
 
 ## URL for webpage
 https://tenzin-kunsang.shinyapps.io/project-kunsang-gormally-mohamed/
